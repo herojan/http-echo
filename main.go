@@ -11,16 +11,26 @@ import (
 	"time"
 
 	"github.com/hashicorp/http-echo/version"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
-	listenFlag  = flag.String("listen", ":5678", "address and port to listen")
-	textFlag    = flag.String("text", "", "text to put on the webpage")
+	listenFlag = flag.String("listen", ":5678", "address and port to listen")
+	// textFlag    = flag.String("text", "", "text to put on the webpage")
 	versionFlag = flag.Bool("version", false, "display version information")
+	serverId    = flag.String("id", "1", "Server id")
+	delay       = flag.Int("delay", 0, "optional delay to apply to each response")
 
 	// stdoutW and stderrW are for overriding in test.
-	stdoutW = os.Stdout
-	stderrW = os.Stderr
+	stdoutW     = os.Stdout
+	stderrW     = os.Stderr
+	reqsCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "reqs_count",
+		Help: "The total number of received requests",
+	},
+		[]string{"server_id"})
 )
 
 func main() {
@@ -32,11 +42,11 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Validation
-	if *textFlag == "" {
-		fmt.Fprintln(stderrW, "Missing -text option!")
-		os.Exit(127)
-	}
+	// // Validation
+	// if *textFlag == "" {
+	// 	fmt.Fprintln(stderrW, "Missing -text option!")
+	// 	os.Exit(127)
+	// }
 
 	args := flag.Args()
 	if len(args) > 0 {
@@ -46,10 +56,13 @@ func main() {
 
 	// Flag gets printed as a page
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", httpLog(stdoutW, withAppHeaders(httpEcho(*textFlag))))
+	mux.HandleFunc("/", httpLog(stdoutW, withAppHeaders(httpEcho(fmt.Sprintf("Port: %s, id: %s", *listenFlag, *serverId)))))
 
 	// Health endpoint
 	mux.HandleFunc("/health", withAppHeaders(httpHealth()))
+
+	// Register metrics
+	mux.Handle("/metrics", promhttp.Handler())
 
 	server := &http.Server{
 		Addr:    *listenFlag,
@@ -84,6 +97,8 @@ func main() {
 
 func httpEcho(v string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(time.Duration(*delay) * time.Millisecond)
+		reqsCounter.WithLabelValues(*serverId).Inc()
 		fmt.Fprintln(w, v)
 	}
 }
